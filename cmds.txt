@@ -2,25 +2,25 @@
 # BE ROOT BEFORE RUNNING, AND MAKE SURE YOU HAVE ALL PROGRAMS USED INSTALLED
 
 # Format EFI as FAT32
-mkfs.fat -F32 /dev/sdb1 | | { echo "mkfs.fat failed"; exit 1; }
+mkfs.fat -F32 /dev/sdb1 || { echo "mkfs.fat failed"; exit 1; }
 
 # Create swap and enable it
-mkswap /dev/sdb2 | | { echo "mkswap failed"; exit 1; }
-swapon /dev/sdb2 | | echo "swapon might require root privileges"
+mkswap /dev/sdb2 || { echo "mkswap failed"; exit 1; }
+swapon /dev/sdb2 || echo "swapon might require root privileges"
 
 # Format root partition ext4
-mkfs.ext4 -F /dev/sdb3 | | { echo "mkfs.ext4 failed"; exit 1; }
+mkfs.ext4 -F /dev/sdb3 || { echo "mkfs.ext4 failed"; exit 1; }
 
 mkdir -p /mnt
-mount /dev/sdb3 /mnt | | { echo "mount /dev/sdb3 failed"; exit 1; }
+mount /dev/sdb3 /mnt || { echo "mount /dev/sdb3 failed"; exit 1; }
 
 if [ -d /boot/efi ]; then
   mkdir -p /mnt/boot/efi
-  mount /dev/sdb1 /mnt/boot/efi | | { echo "mount sdb1 -> /mnt/boot/efi failed"; exit 1; }
+  mount /dev/sdb1 /mnt/boot/efi || { echo "mount sdb1 -> /mnt/boot/efi failed"; exit 1; }
   EFI_DIR="/boot/efi"
 else
   mkdir -p /mnt/boot
-  mount /dev/sdb1 /mnt/boot | | { echo "mount sdb1 -> /mnt/boot failed"; exit 1; }
+  mount /dev/sdb1 /mnt/boot || { echo "mount sdb1 -> /mnt/boot failed"; exit 1; }
   EFI_DIR="/boot"
 fi
 
@@ -39,9 +39,9 @@ else
 fi
 Sync
 
-ROOT_UUID=$(blkid -s UUID -o value /dev/sdb3) | | { echo "cannot read sdb3 UUID"; exit 1; }
-BOOT_UUID=$(blkid -s UUID -o value /dev/sdb1) | | { echo "cannot read sdb1 UUID"; exit 1; }
-SWAP_UUID=$(blkid -s UUID -o value /dev/sdb2) | | { echo "cannot read sdb2 UUID"; exit 1; }
+ROOT_UUID=$(blkid -s UUID -o value /dev/sdb3) || { echo "cannot read sdb3 UUID"; exit 1; }
+BOOT_UUID=$(blkid -s UUID -o value /dev/sdb1) || { echo "cannot read sdb1 UUID"; exit 1; }
+SWAP_UUID=$(blkid -s UUID -o value /dev/sdb2) || { echo "cannot read sdb2 UUID"; exit 1; }
 
 cat > /mnt/etc/fstab <<EOF
 
@@ -74,33 +74,33 @@ set -e
 
 if ! command -v grub-install >/dev/null 2>&1; then
   echo 'grub-install missing in chroot. Installing grub and efibootmgr...'
-  pacman -Sy --noconfirm grub efibootmgr | | { echo 'pacman failed — ensure network access'; exit 1; }
+  pacman -Sy --noconfirm grub efibootmgr || { echo 'pacman failed — ensure network access'; exit 1; }
 fi
 
 # regenerate initramfs for kernels present
 if command -v mkinitcpio >/dev/null 2>&1; then
-  mkinitcpio -P | | echo 'mkinitcpio returned non-zero (ok to continue but check kernels)'
+  mkinitcpio -P || echo 'mkinitcpio returned non-zero (ok to continue but check kernels)'
 fi
 
 # Install GRUB for UEFI
-grub-install --target=x86_64-efi --efi-directory=${EFI_DIR} --bootloader-id=GRUB --recheck | | { echo 'grub-install failed'; exit 1; }
-grub-mkconfig -o /boot/grub/grub.cfg | | { echo 'grub-mkconfig failed'; exit 1; }
+grub-install --target=x86_64-efi --efi-directory=${EFI_DIR} --bootloader-id=GRUB --recheck || { echo 'grub-install failed'; exit 1; }
+grub-mkconfig -o /boot/grub/grub.cfg || { echo 'grub-mkconfig failed'; exit 1; }
 
 echo 'GRUB install + config completed inside chroot'
 "
 
 # unmount efivars (if mounted), bind mounts and filesystems
-umount -l /mnt/dev/pts | | true
-umount -l /mnt/dev | | true
-umount -l /mnt/proc | | true
-umount -l /mnt/sys | | true
-umount -l /mnt/run | | true
+umount -l /mnt/dev/pts || true
+umount -l /mnt/dev || true
+umount -l /mnt/proc || true
+umount -l /mnt/sys || true
+umount -l /mnt/run || true
 
 # unmount new disk
-umount -R /mnt | | true
+umount -R /mnt || true
 
 # disable swap on target
-swapoff /dev/sdb2 | | true
+swapoff /dev/sdb2 || true
 
 sync
 echo "Cleanup done. Now power off and set UEFI to boot the new disk (or unplug the old disk) and test boot."
