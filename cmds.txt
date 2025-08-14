@@ -1,5 +1,5 @@
 # USE CFDISK TO FORMAT DRIVE FIRST, DRIVE USED WAS 250Gb, 521M boot/efi, 8G Swap, rest: filesystem
-
+# BE ROOT BEFORE RUNNING, AND MAKE SURE YOU HAVE ALL PROGRAMS USED INSTALLED
 
 # Format EFI as FAT32
 mkfs.fat -F32 /dev/sdb1 | | { echo "mkfs.fat failed"; exit 1; }
