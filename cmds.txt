@@ -1,0 +1,106 @@
+# USE CFDISK TO FORMAT DRIVE FIRST, DRIVE USED WAS 250Gb, 521M boot/efi, 8G Swap, rest: filesystem
+
+
+# Format EFI as FAT32
+mkfs.fat -F32 /dev/sdb1 | | { echo "mkfs.fat failed"; exit 1; }
+
+# Create swap and enable it
+mkswap /dev/sdb2 | | { echo "mkswap failed"; exit 1; }
+swapon /dev/sdb2 | | echo "swapon might require root privileges"
+
+# Format root partition ext4
+mkfs.ext4 -F /dev/sdb3 | | { echo "mkfs.ext4 failed"; exit 1; }
+
+mkdir -p /mnt
+mount /dev/sdb3 /mnt | | { echo "mount /dev/sdb3 failed"; exit 1; }
+
+if [ -d /boot/efi ]; then
+  mkdir -p /mnt/boot/efi
+  mount /dev/sdb1 /mnt/boot/efi | | { echo "mount sdb1 -> /mnt/boot/efi failed"; exit 1; }
+  EFI_DIR="/boot/efi"
+else
+  mkdir -p /mnt/boot
+  mount /dev/sdb1 /mnt/boot | | { echo "mount sdb1 -> /mnt/boot failed"; exit 1; }
+  EFI_DIR="/boot"
+fi
+
+echo "Mounted: root -> /mnt, EFI -> ${EFI_DIR} inside the copied system"
+
+rsync -aAXHv --numeric-ids --info=progress2 \
+  --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+  / /mnt/
+
+Sync
+
+if [ -d /boot/efi ]; then
+  rsync -aHAX --info=progress2 /boot/efi/ /mnt/boot/efi/
+else
+  rsync -aHAX --info=progress2 /boot/ /mnt/boot/
+fi
+Sync
+
+ROOT_UUID=$(blkid -s UUID -o value /dev/sdb3) | | { echo "cannot read sdb3 UUID"; exit 1; }
+BOOT_UUID=$(blkid -s UUID -o value /dev/sdb1) | | { echo "cannot read sdb1 UUID"; exit 1; }
+SWAP_UUID=$(blkid -s UUID -o value /dev/sdb2) | | { echo "cannot read sdb2 UUID"; exit 1; }
+
+cat > /mnt/etc/fstab <<EOF
+
+UUID=${ROOT_UUID}	/   	ext4	defaults,noatime 0 1
+UUID=${BOOT_UUID}	${EFI_DIR}   vfat	umask=0077,shortname=winnt 0 2
+UUID=${SWAP_UUID}	none	swap	sw          	0 0
+EOF
+
+echo "Wrote /mnt/etc/fstab — inspect it: less /mnt/etc/fstab"
+
+# Bind system dirs
+mount --bind /dev /mnt/dev
+mount --bind /dev/pts /mnt/dev/pts
+mount --bind /proc /mnt/proc
+mount --bind /sys /mnt/sys
+mount --bind /run /mnt/run
+
+# Make DNS available inside chroot so pacman can fetch packages if needed
+cp /etc/resolv.conf /mnt/etc/resolv.conf
+
+# If efivars available, bind them so grub-install can write to NVRAM
+if [ -d /sys/firmware/efi ]; then
+  mkdir -p /mnt/sys/firmware/efi/efivars
+  mount -t efivarfs efivarfs /mnt/sys/firmware/efi/efivars 2>/dev/null || true
+fi
+
+# Enter chroot and run commands there
+arch-chroot /mnt /bin/bash -c "
+set -e
+
+if ! command -v grub-install >/dev/null 2>&1; then
+  echo 'grub-install missing in chroot. Installing grub and efibootmgr...'
+  pacman -Sy --noconfirm grub efibootmgr | | { echo 'pacman failed — ensure network access'; exit 1; }
+fi
+
+# regenerate initramfs for kernels present
+if command -v mkinitcpio >/dev/null 2>&1; then
+  mkinitcpio -P | | echo 'mkinitcpio returned non-zero (ok to continue but check kernels)'
+fi
+
+# Install GRUB for UEFI
+grub-install --target=x86_64-efi --efi-directory=${EFI_DIR} --bootloader-id=GRUB --recheck | | { echo 'grub-install failed'; exit 1; }
+grub-mkconfig -o /boot/grub/grub.cfg | | { echo 'grub-mkconfig failed'; exit 1; }
+
+echo 'GRUB install + config completed inside chroot'
+"
+
+# unmount efivars (if mounted), bind mounts and filesystems
+umount -l /mnt/dev/pts | | true
+umount -l /mnt/dev | | true
+umount -l /mnt/proc | | true
+umount -l /mnt/sys | | true
+umount -l /mnt/run | | true
+
+# unmount new disk
+umount -R /mnt | | true
+
+# disable swap on target
+swapoff /dev/sdb2 | | true
+
+sync
+echo "Cleanup done. Now power off and set UEFI to boot the new disk (or unplug the old disk) and test boot."
